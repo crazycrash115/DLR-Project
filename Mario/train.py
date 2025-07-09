@@ -1,3 +1,4 @@
+#mario is broken do not run
 import os
 import gym_super_mario_bros
 from wrappers import MarioRewardWrapper, ActionRepeatWrapper 
@@ -65,7 +66,12 @@ if __name__ == '__main__':
         model = PPO.load(latest_ckpt, env)
         print(f"Resumed from checkpoint: {latest_ckpt}")
     else:
-        model = PPO("CnnPolicy", env, verbose=1, n_steps=1024, tensorboard_log="./ppo_mario_logs")
+        model = PPO(
+            "CnnPolicy",  #REMEMBER TO CHANGE 
+            env, 
+            verbose=1, 
+            n_cdsteps=1024, 
+            tensorboard_log="./ppo_mario_logs") #REMEMBER TO CHANGE 
         print("Starting training from scratch")
 
     # === Callbacks ===

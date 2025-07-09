@@ -1,0 +1,20 @@
+# Ignore all zip, log, mp4, png, pyc
+*.zip
+*.log
+*.mp4
+*.png
+*.pyc
+
+# Ignore checkpoints and logs recursively in any folder
+**/checkpoints/
+**/logs/
+**/ppo_*/  
+# for ppo_flappy_logs, ppo_mario_logs, ppo_snake_logs
+
+# Ignore all __pycache__ folders
+__pycache__/
+**/__pycache__/
+
+# Ignore all virtual environments
+.venv/
+*/.venv/

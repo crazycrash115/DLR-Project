@@ -46,7 +46,12 @@ elif any(f.endswith('.zip') and 'MLP_snake' in f for f in os.listdir(CHECKPOINT_
     print(f"Resumed from checkpoint: {latest_ckpt}")
 
 else:
-    model = PPO("MlpPolicy", env, verbose=1, n_steps=1024, tensorboard_log=LOG_DIR)
+    model = PPO(
+        "MlpPolicy",  #REMEMBER TO CHANGE 
+        env, 
+        verbose=1, 
+        n_steps=1024, 
+        tensorboard_log=LOG_DIR)
     print("Starting training from scratch")
 
 # === Callbacks ===
