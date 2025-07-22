@@ -9,7 +9,8 @@
 **/checkpoints/
 **/logs/
 **/ppo_*/  
-# for ppo_flappy_logs, ppo_mario_logs, ppo_snake_logs
+# for all PPO logs
+*.tfevents.*  
 
 # Ignore all __pycache__ folders
 __pycache__/

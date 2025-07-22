@@ -36,7 +36,7 @@ class AddChannelWrapper(ObservationWrapper):
             obs = obs[:, :, 0]
         return np.expand_dims(obs, 0)                # (1,H,W)
 
-
+#unused
 class FlappyRewardWrapper(Wrapper):
     def step(self, action):
         obs, reward, done, info = self.env.step(action)
