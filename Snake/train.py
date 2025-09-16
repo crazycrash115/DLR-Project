@@ -1,11 +1,12 @@
-import gym
+import gymnasium as gym
 import gym_snake
 from stable_baselines3.common.monitor import Monitor
 from stable_baselines3.common.vec_env import VecMonitor
 from stable_baselines3 import PPO
 from stable_baselines3.common.vec_env import DummyVecEnv
 from stable_baselines3.common.callbacks import CheckpointCallback
-from reward import SnakeRewardWrapper
+from wrapper import SnakeRewardWrapper 
+from wrapper import GymV21toGymnasium
 from observation import SnakeObservationWrapper
 from callbacks import AutoSaveCallback  
 import os
@@ -16,19 +17,27 @@ CHECKPOINT_DIR = "./checkpoints"
 MODEL_PATH = "./MLP_snake_latest"
 LOG_DIR = "./logs"
 os.makedirs(CHECKPOINT_DIR, exist_ok=True)
+os.makedirs(LOG_DIR, exist_ok=True)
 
 # === Env Setup ===
 def make_env():
-    env = gym.make("snake-v0")
+    try:
+        from gym_snake.envs.snake_env import SnakeEnv
+    except ImportError:
+        from gym_snake.envs.snake import SnakeEnv
+
+    env = SnakeEnv()                
+    env = GymV21toGymnasium(env)  
+
     env.n_foods = 1
     env.random_init = True
     env = SnakeRewardWrapper(env)
-    env = SnakeObservationWrapper(env) #
+    env = SnakeObservationWrapper(env) 
     env = Monitor(env)
     return env
 
-env = DummyVecEnv([make_env])  # Vectorized env
-env = VecMonitor(env)          # Monitor for vec env
+env = DummyVecEnv([make_env])  
+env = VecMonitor(env, LOG_DIR)          
 
 # === Load or Create Model ===
 model = None

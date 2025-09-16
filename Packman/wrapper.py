@@ -1,44 +1,32 @@
 import numpy as np
 import gymnasium as gymn
-from gymnasium import spaces as gymn_spaces
-from gymnasium import ObservationWrapper
+from gymnasium import ObservationWrapper, spaces as gymn_spaces
 
 class AddChannelWrapper(ObservationWrapper):
-    """
-    Ensure final obs is channel-first (1, H, W).
-    Accepts (H,W), (H,W,1), or (H,W,3). Converts RGB -> grayscale when needed.
-    """
     def __init__(self, env):
         super().__init__(env)
         shp = env.observation_space.shape
-        if len(shp) == 2:      # (H, W)
+        if len(shp) == 2:
             h, w = shp
-        elif len(shp) == 3:    # (H, W, C)
+        elif len(shp) == 3:
             h, w = shp[:2]
         else:
             raise ValueError(f"Unexpected obs shape: {shp}")
-
         self.observation_space = gymn_spaces.Box(
             low=0, high=255, shape=(1, h, w), dtype=np.uint8
         )
 
     def observation(self, obs):
-        if obs.ndim == 3 and obs.shape[-1] == 1:   # (H,W,1) -> (H,W)
+        if obs.ndim == 3 and obs.shape[-1] == 1:
             obs = obs[..., 0]
-        elif obs.ndim == 3 and obs.shape[-1] == 3: # RGB -> gray
+        elif obs.ndim == 3 and obs.shape[-1] == 3:
             r = obs[..., 0].astype(np.float32)
             g = obs[..., 1].astype(np.float32)
             b = obs[..., 2].astype(np.float32)
             obs = (0.2989 * r + 0.5870 * g + 0.1140 * b).astype(np.uint8)
-        return np.expand_dims(obs, 0)  # (1,H,W)
+        return np.expand_dims(obs, 0)
 
-# optional (leave off until base learning is stable)
-class FlappyRewardWrapper(gymn.Wrapper):
+class PacmanRewardWrapper(gymn.Wrapper):
     def step(self, action):
         obs, reward, terminated, truncated, info = self.env.step(action)
-        bird_y   = info.get("player_y", 0)
-        pipe_mid = info.get("pipe_gap_y", bird_y)
-        height   = getattr(self.env, "height", info.get("screen_height", 256)) or 256
-        stability = 1.0 - abs(bird_y - pipe_mid) / height
-        reward += 0.01 * stability
         return obs, reward, terminated, truncated, info

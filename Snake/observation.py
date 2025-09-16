@@ -1,5 +1,15 @@
-import gym
 import numpy as np
+import gymnasium as gym
+from gymnasium import spaces
+
+class SnakeObservationWrapper(gym.ObservationWrapper):
+    def __init__(self, env):
+        super().__init__(env)
+        # if you set observation_space anywhere, make sure it uses gymnasium.spaces
+        # self.observation_space = spaces.Box(...)
+
+    def observation(self, obs):
+        return obs
 
 class SnakeObservationWrapper(gym.ObservationWrapper):
     def __init__(self, env):

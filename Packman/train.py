@@ -1,34 +1,43 @@
 import os
 import numpy as np
-import gymnasium as gymn
-import flappy_bird_gymnasium
-from gymnasium.wrappers import AddRenderObservation, ResizeObservation
-
+import gymnasium as gymn                   # Gymnasium only
 from stable_baselines3 import PPO
-from stable_baselines3.common.vec_env import SubprocVecEnv
+from stable_baselines3.common.vec_env import SubprocVecEnv, VecFrameStack
 from stable_baselines3.common.callbacks import CheckpointCallback
+from stable_baselines3.common.monitor import Monitor
 from callbacks import AutoSaveCallback
-from wrapper import *
+from wrapper import AddChannelWrapper      # channel-first (1,84,84)
+from gymnasium.wrappers import AtariPreprocessing
 
 np.set_printoptions(suppress=True)
 
 # === Parallel Environment Setup ===
 def make_env():
     def _init():
-        env = gymn.make("FlappyBird-v0", render_mode="rgb_array", use_lidar=False)
+        import ale_py           
+        env = gymn.make(
+            "ALE/MsPacman-v5",
+            render_mode=None,
+            frameskip=1,
+            repeat_action_probability=0.0,
+        )
 
-        # image obs -> (H,W,3), then resize, then (1,H,W)
-        env = AddRenderObservation(env, render_only=True)
-        env = ResizeObservation(env, (84, 84))
-        env = AddChannelWrapper(env)       # change if not using CNN
 
-        # monitoring (same style as before)
-        from stable_baselines3.common.monitor import Monitor
+        # Atari preprocessing: 84x84 grayscale uint8 + frame_skip=4
+        env = AtariPreprocessing(
+            env,
+            grayscale_obs=True,
+            scale_obs=False,
+            frame_skip=4,
+            screen_size=84
+        )
+
+        env = AddChannelWrapper(env)  # (1,84,84)
         env = Monitor(env)
         return env
     return _init
 
-# === (Required for WINDOWS Multiprocessing) ===
+# === (Required for WINDOWS multiprocessing) ===
 if __name__ == '__main__':
     import multiprocessing
     multiprocessing.freeze_support()
@@ -36,11 +45,12 @@ if __name__ == '__main__':
     # === Env Creation ===
     NUM_ENVS = 16
     env = SubprocVecEnv([make_env() for _ in range(NUM_ENVS)], start_method="spawn")
+    env = VecFrameStack(env, n_stack=4, channels_order="first")  # (4,84,84)
 
     # === Paths ===
     CHECKPOINT_DIR = "./checkpoints"
-    LATEST_MODEL_PATH = "CNN_flappy_latest"   # REMEMBER TO CHANGE
-    FINAL_MODEL_PATH  = "CNN_flappy_final"    # REMEMBER TO CHANGE
+    LATEST_MODEL_PATH = "CNN_pacman_latest"
+    FINAL_MODEL_PATH  = "CNN_pacman_final"
     os.makedirs(CHECKPOINT_DIR, exist_ok=True)
 
     # === Load or Create Model ===
@@ -49,12 +59,12 @@ if __name__ == '__main__':
         print("Resumed from latest autosave")
     else:
         model = PPO(
-            "CnnPolicy",                     # REMEMBER TO CHANGE if switching policy
+            "CnnPolicy",
             env,
             verbose=1,
             n_steps=1024,
-            tensorboard_log="./ppo_flappy_logs",
-            policy_kwargs=dict(normalize_images=False)  # channel-first uint8 already
+            tensorboard_log="./ppo_pacman_logs",
+            policy_kwargs=dict(normalize_images=False)
         )
         print("Starting training from scratch")
 
@@ -62,7 +72,7 @@ if __name__ == '__main__':
     checkpoint_callback = CheckpointCallback(
         save_freq=10_000,
         save_path=CHECKPOINT_DIR,
-        name_prefix="flappy_CNN"            # REMEMBER TO CHANGE
+        name_prefix="pacman_CNN"
     )
     autosave_callback = AutoSaveCallback(
         save_path=LATEST_MODEL_PATH,
@@ -78,4 +88,4 @@ if __name__ == '__main__':
 
     # === Save Final Model ===
     model.save(FINAL_MODEL_PATH)
-    print("Final Flappy model saved.")
+    print("Final Pac-Man model saved.")
