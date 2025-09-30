@@ -24,16 +24,16 @@ def make_test_env():
     env = ScaleWrapper(env, scale=True)
     env = PacmanRewardWrapper(
             env,
-            base_scale=0.02,
-            survive_bonus=0.02,
-            no_score_patience=60,
-            no_score_penalty=0.0,           # set >0 only if you really want anti-stall
+            base_scale=0.05,
+            survive_bonus=0.01,
+            no_score_patience=40,
+            no_score_penalty=0.01,           # set >0 only if you really want anti-stall
             death_penalty=10.0,
         )
     return env
 
 env = make_test_env()
-print("Obs space:", env.observation_space)  # expect Box(0.0,1.0,(512,),float32)
+print("Obs space:", env.observation_space)  
 assert os.path.exists(MODEL_PATH), f"model not found: {MODEL_PATH}"
 
 model = PPO.load(MODEL_PATH, env=env, device="cpu")

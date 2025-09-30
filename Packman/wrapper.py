@@ -64,6 +64,25 @@ class FrameStack(gym.ObservationWrapper):
         self._buf[-1] = obs
         return self._buf.reshape(-1)
 
+import gymnasium as gym
+
+class OneLifeWrapper(gym.Wrapper):
+    def __init__(self, env):
+        super().__init__(env)
+        self._lives = None
+
+    def reset(self, **kwargs):
+        obs, info = self.env.reset(**kwargs)
+        self._lives = self.unwrapped.ale.lives()
+        return obs, info
+
+    def step(self, action):
+        obs, reward, terminated, truncated, info = self.env.step(action)
+        lives = info.get("lives", self.unwrapped.ale.lives())
+        if lives < self._lives:
+            terminated = True
+        self._lives = lives
+        return obs, reward, terminated, truncated, info
 
 class PacmanRewardWrapper(gym.Wrapper):
     """
