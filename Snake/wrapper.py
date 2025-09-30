@@ -2,7 +2,6 @@ import gymnasium as gym
 from gymnasium import spaces
 import numpy as np
 
-#cant lie not 100% sure what this does but it fixed my errors
 class GymV21toGymnasium(gym.Env):
     def __init__(self, env):
         self.env = env
@@ -54,7 +53,15 @@ class GymV21toGymnasium(gym.Env):
             return spaces.MultiBinary(space.shape)
         return space
 
-
+class SnakeActionListWrapper(gym.ActionWrapper):
+    def action(self, act):
+        if isinstance(act, (np.integer, int)):
+            return [int(act)]
+        arr = np.asarray(act)
+        if arr.ndim == 0:
+            return [int(arr)]
+        return list(arr)
+    
 class SnakeRewardWrapper(gym.Wrapper):
     def __init__(self, env):
         super().__init__(env)
@@ -69,11 +76,15 @@ class SnakeRewardWrapper(gym.Wrapper):
 
     def reset(self, *, seed=None, options=None):
         obs, info = self.env.reset(seed=seed, options=options)
-        head = self.controller.snakes[0].head
-        food = self.get_food_position(self.controller.grid)
 
-        if food:
-            self.prev_distance = np.linalg.norm(np.array(head) - np.array(food))
+        base = self.unwrapped
+        if hasattr(base, "controller") and base.controller.snakes:
+            head = base.controller.snakes[0].head
+            food = self.get_food_position(base.controller.grid)
+            if food is not None:
+                self.prev_distance = np.linalg.norm(np.array(head) - np.array(food))
+            else:
+                self.prev_distance = None
         else:
             self.prev_distance = None
 
@@ -109,7 +120,7 @@ class SnakeRewardWrapper(gym.Wrapper):
 
         # Died
         elif reward == -1:
-            reward = -1
+            reward = -5 # Hopefully itll not want to die anymore 
             self.prev_distance = None
             self.steps_near_food = 0
 
@@ -117,10 +128,11 @@ class SnakeRewardWrapper(gym.Wrapper):
             # Time penalty every step to prevent stalling (try upping?)
             reward -= 0.01
 
-            snake = self.controller.snakes[0]
+            base = self.unwrapped
+            snake = base.controller.snakes[0] if hasattr(base, "controller") and base.controller.snakes else None
             if snake:
                 head = snake.head
-                food = self.get_food_position(self.controller.grid)
+                food = self.get_food_position(base.controller.grid)
 
                 if food:
                     dist = np.linalg.norm(np.array(head) - np.array(food))
@@ -144,4 +156,4 @@ class SnakeRewardWrapper(gym.Wrapper):
 
                         self.prev_distance = dist
 
-        return obs, reward, terminated, truncated, info  
+        return obs, reward, terminated, truncated, info

@@ -1,81 +1,79 @@
+import os
 import gymnasium as gym
 import gym_snake
-from stable_baselines3.common.monitor import Monitor
-from stable_baselines3.common.vec_env import VecMonitor
+
 from stable_baselines3 import PPO
-from stable_baselines3.common.vec_env import DummyVecEnv
+from stable_baselines3.common.vec_env import SubprocVecEnv, VecMonitor
 from stable_baselines3.common.callbacks import CheckpointCallback
-from wrapper import SnakeRewardWrapper 
-from wrapper import GymV21toGymnasium
+
+from wrapper import GymV21toGymnasium, SnakeActionListWrapper, SnakeRewardWrapper
 from observation import SnakeObservationWrapper
 from callbacks import AutoSaveCallback  
-import os
-import re
 
 # === Paths ===
 CHECKPOINT_DIR = "./checkpoints"
-MODEL_PATH = "./MLP_snake_latest"
-LOG_DIR = "./logs"
+MODEL_PATH     = "./MLP_snake_latest"
+LOG_DIR        = "./logs"
 os.makedirs(CHECKPOINT_DIR, exist_ok=True)
 os.makedirs(LOG_DIR, exist_ok=True)
 
-# === Env Setup ===
+# === Parallel Env  ===
 def make_env():
-    try:
-        from gym_snake.envs.snake_env import SnakeEnv
-    except ImportError:
-        from gym_snake.envs.snake import SnakeEnv
+    def _init():
+        try:
+            from gym_snake.envs.snake_env import SnakeEnv
+        except ImportError:
+            from gym_snake.envs.snake import SnakeEnv
 
-    env = SnakeEnv()                
-    env = GymV21toGymnasium(env)  
+        env = SnakeEnv()                    
+        env = GymV21toGymnasium(env)
+        env = SnakeActionListWrapper(env)     
 
-    env.n_foods = 1
-    env.random_init = True
-    env = SnakeRewardWrapper(env)
-    env = SnakeObservationWrapper(env) 
-    env = Monitor(env)
-    return env
+        # base config
+        env.n_foods = 1
+        env.random_init = True
 
-env = DummyVecEnv([make_env])  
-env = VecMonitor(env, LOG_DIR)          
+        env = SnakeRewardWrapper(env)
+        env = SnakeObservationWrapper(env)
+        return env
+    return _init
 
-# === Load or Create Model ===
-model = None
-latest_ckpt = None
+if __name__ == "__main__":
+    import multiprocessing
+    multiprocessing.freeze_support()
 
-if os.path.exists(f"{MODEL_PATH}.zip"):
-    model = PPO.load(MODEL_PATH, env)
-    print("Resumed from latest autosave")
+    NUM_ENVS = 16  
 
-elif any(f.endswith('.zip') and 'MLP_snake' in f for f in os.listdir(CHECKPOINT_DIR)):
-    checkpoints = [f for f in os.listdir(CHECKPOINT_DIR) if f.endswith('.zip') and 'MLP_snake' in f]
-    checkpoints.sort(key=lambda x: int(re.search(r'_(\d+)_steps', x).group(1)))
-    latest_ckpt = os.path.join(CHECKPOINT_DIR, checkpoints[-1])
-    model = PPO.load(latest_ckpt, env)
-    print(f"Resumed from checkpoint: {latest_ckpt}")
+  
+    venv = SubprocVecEnv([make_env() for _ in range(NUM_ENVS)], start_method="spawn")
+    venv = VecMonitor(venv, LOG_DIR)
 
-else:
-    model = PPO(
-        "MlpPolicy",  #REMEMBER TO CHANGE 
-        env, 
-        verbose=1, 
-        n_steps=1024, 
-        tensorboard_log=LOG_DIR)
-    print("Starting training from scratch")
+    # Load or create model 
+    if os.path.exists(f"{MODEL_PATH}.zip"):
+        model = PPO.load(MODEL_PATH, env=venv, device="auto")
+        print("Resumed from latest autosave")
+    else:
+        model = PPO(
+            "MlpPolicy",
+            venv,
+            verbose=1,
+            tensorboard_log=LOG_DIR,
+        )
+        print("Starting training from scratch")
 
-# === Callbacks ===
-checkpoint_callback = CheckpointCallback(
-    save_freq=10000,
-    save_path=CHECKPOINT_DIR,
-    name_prefix="MLP_snake"
-)
+    # Callbacks
+    checkpoint_cb = CheckpointCallback(
+        save_freq=10_000,  
+        save_path=CHECKPOINT_DIR,
+        name_prefix="MLP_snake",
+    )
+    autosave_cb = AutoSaveCallback(save_path=MODEL_PATH, save_freq=2048, verbose=1)
 
-autosave_callback = AutoSaveCallback(
-    save_path=MODEL_PATH,
-    save_freq=2048,
-    verbose=1
-)
+    # Train
+    model.learn(total_timesteps=100_024_000, callback=[checkpoint_cb, autosave_cb])
 
-# === Train ===
-model.learn(total_timesteps=1_024_000, callback=[checkpoint_callback, autosave_callback])
-model.save("./snake/MLP_snake_final")
+    # Save
+    os.makedirs("./snake", exist_ok=True)
+    model.save("./snake/MLP_snake_final")
+
+    venv.close()

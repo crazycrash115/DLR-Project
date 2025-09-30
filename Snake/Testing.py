@@ -1,8 +1,7 @@
 import gymnasium as gym
 import gym_snake
 from stable_baselines3 import PPO
-from wrapper import SnakeRewardWrapper 
-from wrapper import GymV21toGymnasium
+from wrapper import *
 from observation import SnakeObservationWrapper
 
 def main():
@@ -16,8 +15,9 @@ def main():
     env = GymV21toGymnasium(env)
     env.n_foods = 1
     env.random_init = True
-    env = SnakeRewardWrapper(env)      ### reward wrapper
-    env = SnakeObservationWrapper(env) ### dont forget to remove if swapping
+    env = SnakeRewardWrapper(env)      # reward wrapper
+    env = SnakeObservationWrapper(env) # dont forget to remove if swapping to any other algo
+    env = SnakeActionListWrapper(env)  # ensure iterable action
 
     # === Load trained model ===
     model = PPO.load("./MLP_snake_latest")  # REMEMBA TO CHANG PATH
@@ -30,7 +30,7 @@ def main():
         env.render() # show the game
 
         action, _ = model.predict(obs, deterministic=True)
-        obs, reward, terminated, truncated, info = env.step(action)
+        obs, reward, terminated, truncated, info = env.step(action)  # wrapper converts to [int]
         done = terminated or truncated
         total_reward += reward
 
