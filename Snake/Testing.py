@@ -1,43 +1,53 @@
+import os
+import numpy as np
 import gymnasium as gym
 import gym_snake
 from stable_baselines3 import PPO
-from wrapper import *
+
+from wrapper import GymV21toGymnasium, SnakeRewardWrapper, SnakeActionListWrapper
 from observation import SnakeObservationWrapper
 
-def main():
-    # === Load and wrap env ===
+MODEL_PATH   = "./MLP_snake_latest"
+N_EPISODES   = 10
+RENDER       = True
+
+def make_env():
     try:
         from gym_snake.envs.snake_env import SnakeEnv
     except ImportError:
         from gym_snake.envs.snake import SnakeEnv
-
     env = SnakeEnv()
     env = GymV21toGymnasium(env)
     env.n_foods = 1
     env.random_init = True
-    env = SnakeRewardWrapper(env)      # reward wrapper
-    env = SnakeObservationWrapper(env) # dont forget to remove if swapping to any other algo
-    env = SnakeActionListWrapper(env)  # ensure iterable action
+    env = SnakeRewardWrapper(env)
+    env = SnakeObservationWrapper(env)
+    env = SnakeActionListWrapper(env)
+    return env
 
-    # === Load trained model ===
-    model = PPO.load("./MLP_snake_latest")  # REMEMBA TO CHANG PATH
+env = make_env()
+print("Obs space:", env.observation_space)
+print("Act space:", env.action_space)
 
-    obs, info = env.reset(seed=0)
+assert os.path.isfile(f"{MODEL_PATH}.zip") or os.path.isfile(MODEL_PATH), "model not found"
+model = PPO.load(MODEL_PATH, env=env, device="cpu")
+print(f"Loaded model: {MODEL_PATH}")
+
+episode_rewards = []
+for ep in range(1, N_EPISODES + 1):
+    obs, info = env.reset()
     done = False
-    total_reward = 0
-
-    while True:
-        env.render() # show the game
+    ep_reward = 0.0
+    while not done:
+        if RENDER:
+            env.render()
 
         action, _ = model.predict(obs, deterministic=True)
-        obs, reward, terminated, truncated, info = env.step(action)  # wrapper converts to [int]
+        obs, reward, terminated, truncated, info = env.step(action)
         done = terminated or truncated
-        total_reward += reward
+        ep_reward += float(reward)
 
-        if done:
-            print(f"Episode finished. Score: {total_reward}")
-            total_reward = 0
-            obs, info = env.reset()
+    episode_rewards.append(ep_reward)
+    print(f"Episode {ep:02d} — reward: {ep_reward:.1f}")
 
-if __name__ == "__main__":
-    main()
+env.close()

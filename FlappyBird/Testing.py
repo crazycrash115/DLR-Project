@@ -2,30 +2,30 @@ import os
 import numpy as np
 import gymnasium as gymn
 import flappy_bird_gymnasium
+import cv2
 
 from stable_baselines3 import PPO
-from gymnasium.wrappers import ResizeObservation
-from wrapper import AddChannelWrapper
+from gymnasium.wrappers import AddRenderObservation, ResizeObservation
+from wrapper import AddChannelWrapper, ChannelFrameStack, FlappyRewardWrapper
 
-np.set_printoptions(suppress=True)
-
-MODEL_PATH = "CNN_flappy_latest.zip"  # Change if needed
+MODEL_PATH = "./CNN_flappy_latest"
 N_EPISODES = 10
-RENDER     = True
+RENDER = True
 
-def make_test_env():
-    env = gymn.make(
-        "FlappyBird-v0",
-        render_mode="human" if RENDER else None,
-        use_lidar=False
-    )
+def make_env():
+    env = gymn.make("FlappyBird-v0", render_mode="rgb_array", use_lidar=False)
+    env = AddRenderObservation(env, render_only=True)
     env = ResizeObservation(env, (84, 84))
     env = AddChannelWrapper(env)
+    env = FlappyRewardWrapper(env)      # same shaping as training
+    env = ChannelFrameStack(env, k=4)
     return env
 
-env = make_test_env()
-assert os.path.exists(MODEL_PATH), f"model not found: {MODEL_PATH}"
+env = make_env()
+print("Obs space:", env.observation_space)  # (4, 84, 84)
+print("Act space:", env.action_space)
 
+assert os.path.isfile(f"{MODEL_PATH}.zip"), "model not found"
 model = PPO.load(MODEL_PATH, env=env, device="cpu")
 print(f"Loaded model: {MODEL_PATH}")
 
@@ -34,8 +34,13 @@ for ep in range(1, N_EPISODES + 1):
     obs, _ = env.reset()
     done = False
     ep_reward = 0.0
-
     while not done:
+        if RENDER:
+            frame = env.render()
+            if frame is not None:
+                cv2.imshow("FlappyBird (test)", frame[:, :, ::-1])
+                cv2.waitKey(1)
+
         action, _ = model.predict(obs, deterministic=True)
         obs, reward, terminated, truncated, info = env.step(int(action))
         done = terminated or truncated
@@ -44,9 +49,6 @@ for ep in range(1, N_EPISODES + 1):
     episode_rewards.append(ep_reward)
     print(f"Episode {ep:02d} — reward: {ep_reward:.1f}")
 
-mean_r = np.mean(episode_rewards)
-std_r  = np.std(episode_rewards)
-print(f"\n=== finished {N_EPISODES} episodes ===")
-print(f"mean reward: {mean_r:.2f} ± {std_r:.2f}")
-
 env.close()
+if RENDER:
+    cv2.destroyAllWindows()
