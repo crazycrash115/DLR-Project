@@ -6,7 +6,7 @@ import cv2
 
 from stable_baselines3 import PPO
 from gymnasium.wrappers import AddRenderObservation, ResizeObservation
-from wrapper import AddChannelWrapper, ChannelFrameStack, FlappyRewardWrapper
+from wrapper import *
 
 MODEL_PATH = "./CNN_flappy_latest"
 N_EPISODES = 10
@@ -16,9 +16,13 @@ def make_env():
     env = gymn.make("FlappyBird-v0", render_mode="rgb_array", use_lidar=False)
     env = AddRenderObservation(env, render_only=True)
     env = ResizeObservation(env, (84, 84))
-    env = AddChannelWrapper(env)
-    env = FlappyRewardWrapper(env)      # same shaping as training
-    env = ChannelFrameStack(env, k=4)
+    env = AddChannelWrapper(env)                    # (1,84,84)
+    env = ChannelFrameStack(env, k=4)               # (4,84,84)
+    env = FlappyRewardWrapper(env,                  # same reward as training
+                               survive_bonus=0.05,
+                               pipe_reward=1.0,
+                               gap_weight=0.01,
+                               death_penalty=1.0)
     return env
 
 env = make_env()
@@ -40,12 +44,10 @@ for ep in range(1, N_EPISODES + 1):
             if frame is not None:
                 cv2.imshow("FlappyBird (test)", frame[:, :, ::-1])
                 cv2.waitKey(1)
-
         action, _ = model.predict(obs, deterministic=True)
         obs, reward, terminated, truncated, info = env.step(int(action))
         done = terminated or truncated
         ep_reward += float(reward)
-
     episode_rewards.append(ep_reward)
     print(f"Episode {ep:02d} — reward: {ep_reward:.1f}")
 

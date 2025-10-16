@@ -1,13 +1,27 @@
 import os
 import numpy as np
 import gymnasium as gymn
-from stable_baselines3 import PPO
+
+# === Choose algo  ===
+while True:
+    ALG = input("Would you like PPO or A2C? ").strip().upper()
+    if ALG == "PPO":
+        print("Using PPO.")
+        from stable_baselines3 import PPO as ALG_CLASS
+        break
+    elif ALG == "A2C":
+        print("Using A2C.")
+        from stable_baselines3 import A2C as ALG_CLASS
+        break
+    else:
+        print("Invalid choice. Please type 'PPO' or 'A2C'.")
 
 from wrapper import Controls, FrameStack, ScaleWrapper, PacmanRewardWrapper
 
-MODEL_PATH   = "./MLP_pacman_latest"
-N_EPISODES   = 10
-RENDER       = True
+NAME        = f"{ALG}_pacman_MLP"
+MODEL_PATH  = f"./{NAME}_latest"  
+N_EPISODES  = 10
+RENDER      = True
 
 def make_env():
     import ale_py
@@ -23,11 +37,11 @@ def make_env():
     env = ScaleWrapper(env, scale=True)
     env = PacmanRewardWrapper(
         env,
-        base_scale=0.05,
+        base_scale=0.1,
         survive_bonus=0.01,
-        no_score_patience=40,
-        no_score_penalty=0.01,
-        death_penalty=10.0,
+        no_score_patience=20,
+        no_score_penalty=0.1,
+        death_penalty=5.0,
     )
     return env
 
@@ -35,9 +49,13 @@ env = make_env()
 print("Obs space:", env.observation_space)
 print("Act space:", env.action_space)
 
-assert os.path.isfile(f"{MODEL_PATH}.zip") or os.path.isfile(MODEL_PATH), "model not found"
-model = PPO.load(MODEL_PATH, env=env, device="cpu")
-print(f"Loaded model: {MODEL_PATH}")
+candidate_paths = [MODEL_PATH, f"{MODEL_PATH}.zip"]
+model_file = next((p for p in candidate_paths if os.path.isfile(p)), None)
+if model_file is None:
+    raise FileNotFoundError(f"Model not found. Tried: {candidate_paths}")
+
+model = ALG_CLASS.load(model_file, env=env, device="cpu")
+print(f"Loaded model: {model_file}")
 
 episode_rewards = []
 for ep in range(1, N_EPISODES + 1):
@@ -47,12 +65,10 @@ for ep in range(1, N_EPISODES + 1):
     while not done:
         if RENDER:
             env.render()
-
         action, _ = model.predict(obs, deterministic=True)
         obs, reward, terminated, truncated, info = env.step(int(action))
         done = terminated or truncated
         ep_reward += float(reward)
-
     episode_rewards.append(ep_reward)
     print(f"Episode {ep:02d} — reward: {ep_reward:.1f}")
 

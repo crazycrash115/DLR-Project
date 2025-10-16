@@ -9,7 +9,7 @@ from stable_baselines3.common.vec_env import SubprocVecEnv, VecFrameStack
 from stable_baselines3.common.callbacks import CheckpointCallback
 from stable_baselines3.common.monitor import Monitor
 from callbacks import AutoSaveCallback
-from wrapper import AddChannelWrapper, FlappyRewardWrapper
+from wrapper import *
 
 np.set_printoptions(suppress=True)
 
@@ -18,8 +18,12 @@ def make_env():
         env = gymn.make("FlappyBird-v0", render_mode="rgb_array", use_lidar=False)
         env = AddRenderObservation(env, render_only=True)
         env = ResizeObservation(env, (84, 84))
-        env = AddChannelWrapper(env)
-        env = FlappyRewardWrapper(env)   # reward shaping
+        env = AddChannelWrapper(env)             
+        env = FlappyRewardWrapper(env, 
+                                  gamma=0.99, 
+                                  gap_weight=0.5, 
+                                  extra_pipe_bonus=0.0)
+
         env = Monitor(env)
         return env
     return _init
@@ -28,7 +32,7 @@ if __name__ == "__main__":
     import multiprocessing
     multiprocessing.freeze_support()
 
-    NUM_ENVS = 16
+    NUM_ENVS = 4  # keep small on CPU/Windows
     env = SubprocVecEnv([make_env() for _ in range(NUM_ENVS)], start_method="spawn")
     env = VecFrameStack(env, n_stack=4, channels_order="first")  # (4,84,84)
 

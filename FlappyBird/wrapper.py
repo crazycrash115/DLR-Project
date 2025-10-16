@@ -27,24 +27,52 @@ class AddChannelWrapper(ObservationWrapper):
         return np.expand_dims(obs, 0)
 
 class FlappyRewardWrapper(gymn.Wrapper):
-    def __init__(self, env, survive_bonus=0.01, gap_weight=0.02, death_penalty=1.0):
-        super().__init__(env)
-        self.survive_bonus = float(survive_bonus)
-        self.gap_weight = float(gap_weight)
-        self.death_penalty = float(death_penalty)
 
-    def step(self, action):
-        obs, reward, terminated, truncated, info = self.env.step(action)
-        reward += self.survive_bonus
+    def __init__(self, env, gamma=0.99, gap_weight=0.5, extra_pipe_bonus=0.0):
+        super().__init__(env)
+        self.gamma = float(gamma)
+        self.gap_weight = float(gap_weight)
+        self.extra_pipe_bonus = float(extra_pipe_bonus)
+        self._prev_phi = None
+        self._prev_score = 0
+
+    def _phi_from_info(self, info):
         bird_y = info.get("player_y")
         gap_y  = info.get("pipe_gap_y")
         H      = getattr(self.env, "height", info.get("screen_height", 256)) or 256
-        if bird_y is not None and gap_y is not None and H:
-            proximity = 1.0 - abs(float(bird_y) - float(gap_y)) / float(H)
-            reward += self.gap_weight * proximity
-        if terminated:
-            reward -= self.death_penalty
-        return obs, reward, terminated, truncated, info
+        if bird_y is None or gap_y is None or not H:
+            return None
+        return -abs(float(bird_y) - float(gap_y)) / float(H)
+
+    def reset(self, **kwargs):
+        obs, info = self.env.reset(**kwargs)
+        self._prev_phi = self._phi_from_info(info)
+        sc = info.get("score", 0)
+        self._prev_score = int(sc) if isinstance(sc, (int, float)) else 0
+        return obs, info
+
+    def step(self, action):
+        obs, env_r, terminated, truncated, info = self.env.step(action)
+
+        # Base env reward
+        reward = float(env_r)
+
+        # Optional extra bonus for pipe(s)
+        cur_score = info.get("score", self._prev_score)
+        cur_score = int(cur_score) if isinstance(cur_score, (int, float)) else self._prev_score
+        delta = max(0, cur_score - self._prev_score)
+        if delta > 0 and self.extra_pipe_bonus != 0.0:
+            reward += self.extra_pipe_bonus * delta
+        self._prev_score = cur_score
+
+        # Potential-based shaping
+        phi_next = self._phi_from_info(info)
+        if self._prev_phi is not None and phi_next is not None:
+            shaping = self.gamma * phi_next - self._prev_phi
+            reward += self.gap_weight * float(shaping)
+        self._prev_phi = phi_next
+
+        return obs, float(reward), terminated, truncated, info
 
 class ChannelFrameStack(ObservationWrapper):
     def __init__(self, env, k=4):
