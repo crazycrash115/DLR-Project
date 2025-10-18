@@ -37,11 +37,23 @@ def make_env():
     env = ScaleWrapper(env, scale=True)
     env = PacmanRewardWrapper(
         env,
-        base_scale=0.1,
-        survive_bonus=0.01,
-        no_score_patience=20,
-        no_score_penalty=0.1,
-        death_penalty=5.0,
+        base_scale=0.05,
+        survive_bonus=0.0,
+        no_score_patience=999,   
+        no_score_penalty=0.0,   
+        death_penalty=3.0,
+
+        # extras 
+        pos_boost=0.0,
+        combo_window=0,
+        combo_step_bonus=0.0,
+        power_trigger_min=float("inf"),
+        power_steps=0,
+        power_step_bonus=0.0,
+        ghost_threshold=float("inf"),
+        ghost_mult=0.0,
+
+        max_steps=None,
     )
     return env
 
