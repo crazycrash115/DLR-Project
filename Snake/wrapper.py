@@ -1,6 +1,7 @@
 import gymnasium as gym
 from gymnasium import spaces
 import numpy as np
+from collections import deque
 
 class GymV21toGymnasium(gym.Env):
     def __init__(self, env):
@@ -66,30 +67,31 @@ class SnakeRewardWrapper(gym.Wrapper):
     def __init__(self, env):
         super().__init__(env)
         self.prev_distance = None
+        self.prev_head = None
         self.steps_since_last_apple = 0
         self.steps_near_food = 0
-
-        # Tuning thresholds
-        self.min_eat_dist = 1.5           # close to food
-        self.min_progress_delta = 0.5     # significant distance improvement
-        self.max_orbit_steps = 4          # how long it's allowed to linger near food
+        self.recent = deque(maxlen=6)
+        self.min_eat_dist = 1.5
+        self.progress_scale = 0.06
+        self.align_scale = 0.05
+        self.linger_eps = 0.05
+        self.linger_penalty = 0.03
+        self.osc_penalty = 0.4
 
     def reset(self, *, seed=None, options=None):
         obs, info = self.env.reset(seed=seed, options=options)
-
         base = self.unwrapped
-        if hasattr(base, "controller") and base.controller.snakes:
-            head = base.controller.snakes[0].head
-            food = self.get_food_position(base.controller.grid)
-            if food is not None:
-                self.prev_distance = np.linalg.norm(np.array(head) - np.array(food))
-            else:
-                self.prev_distance = None
-        else:
-            self.prev_distance = None
-
+        self.prev_head = None
         self.steps_since_last_apple = 0
         self.steps_near_food = 0
+        self.recent.clear()
+        if hasattr(base, "controller") and base.controller.snakes:
+            head = np.array(base.controller.snakes[0].head, dtype=np.float32)
+            food = self.get_food_position(base.controller.grid)
+            self.prev_head = tuple(head.tolist())
+            self.prev_distance = np.linalg.norm(head - np.array(food, dtype=np.float32)) if food is not None else None
+        else:
+            self.prev_distance = None
         return obs, info
 
     def __getattr__(self, name):
@@ -99,10 +101,8 @@ class SnakeRewardWrapper(gym.Wrapper):
         color = np.array([0, 0, 255], dtype=np.uint8)
         matches = np.all(grid.grid == color, axis=2)
         coords = np.argwhere(matches)
-
         if coords.shape[0] == 0:
             return None
-
         y_px, x_px = coords[0]
         return (x_px // grid.unit_size, y_px // grid.unit_size)
 
@@ -111,49 +111,61 @@ class SnakeRewardWrapper(gym.Wrapper):
         self.steps_since_last_apple += 1
 
         if reward == 1:
-            # Ate food + speed bonus
-            fast_bonus = max(0, 1.0 - 0.02 * self.steps_since_last_apple)
-            reward = 2 + fast_bonus
+            fast_bonus = max(0.0, 1.0 - 0.02 * self.steps_since_last_apple)
+            reward = 2.0 + fast_bonus
             self.prev_distance = None
+            self.prev_head = None
             self.steps_since_last_apple = 0
             self.steps_near_food = 0
+            self.recent.clear()
+            return obs, reward, terminated, truncated, info
 
-        # Died
-        elif reward == -1:
-            reward = -5 # Hopefully itll not want to die anymore 
+        if reward == -1:
+            reward = -30.0
             self.prev_distance = None
+            self.prev_head = None
             self.steps_near_food = 0
+            self.recent.clear()
+            return obs, reward, terminated, truncated, info
 
-        else:
-            # Time penalty every step to prevent stalling (try upping?)
-            reward -= 0.01
+        reward -= 0.005
 
-            base = self.unwrapped
-            snake = base.controller.snakes[0] if hasattr(base, "controller") and base.controller.snakes else None
-            if snake:
-                head = snake.head
-                food = self.get_food_position(base.controller.grid)
+        base = self.unwrapped
+        snake = base.controller.snakes[0] if hasattr(base, "controller") and base.controller.snakes else None
+        if snake:
+            head = np.array(snake.head, dtype=np.float32)
+            food = self.get_food_position(base.controller.grid)
+            if food:
+                food = np.array(food, dtype=np.float32)
+                dist = np.linalg.norm(head - food)
 
-                if food:
-                    dist = np.linalg.norm(np.array(head) - np.array(food))
+                grid = base.controller.grid
+                diag = float(np.hypot(grid.grid_size[0], grid.grid_size[1]))
+                if self.prev_distance is not None and diag > 0:
+                    reward += self.progress_scale * ((self.prev_distance - dist) / diag)
 
-                    if self.prev_distance is not None:
-                        delta = self.prev_distance - dist
+                move_vec = np.zeros(2, dtype=np.float32) if self.prev_head is None else head - np.array(self.prev_head, dtype=np.float32)
+                to_food = food - head
+                if np.linalg.norm(move_vec) > 0 and np.linalg.norm(to_food) > 0:
+                    mv = move_vec / (np.linalg.norm(move_vec) + 1e-8)
+                    tf = to_food / (np.linalg.norm(to_food) + 1e-8)
+                    reward += self.align_scale * float(np.dot(mv, tf))
 
-                        # Only reward if the improvement is meaningful
-                        if delta > self.min_progress_delta:
-                            reward += 0.2
-                        elif delta < -self.min_progress_delta:
-                            reward -= 0.1
+                if dist < self.min_eat_dist:
+                    self.steps_near_food += 1
+                    if self.prev_distance is not None and (self.prev_distance - dist) < self.linger_eps:
+                        reward -= self.linger_penalty * (1.05 ** self.steps_near_food)
+                else:
+                    self.steps_near_food = 0
 
-                        # Penalize orbiting around food too long
-                        if dist < self.min_eat_dist:
-                            self.steps_near_food += 1
-                            if self.steps_near_food > self.max_orbit_steps:
-                                reward -= 1.0
-                        else:
-                            self.steps_near_food = 0
+                self.recent.append(tuple(head.tolist()))
+                if len(self.recent) >= 4 and self.recent[-1] == self.recent[-3] and self.recent[-2] == self.recent[-4]:
+                    reward -= self.osc_penalty
 
-                        self.prev_distance = dist
+                self.prev_distance = dist
+                self.prev_head = tuple(head.tolist())
 
-        return obs, reward, terminated, truncated, info
+        if truncated and not terminated:
+            reward -= 5.0
+
+        return obs, float(reward), terminated, truncated, info
