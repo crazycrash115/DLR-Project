@@ -9,13 +9,11 @@ class SnakeObservationWrapper(gym.ObservationWrapper):
         self.grid_size = None
         self.unit_size = None
 
-        # total feature length: head/dir/food/delta/dist/len + body coords + mask
         d = 12 + 3 * self.max_body_parts
         self.observation_space = spaces.Box(low=0.0, high=1.0, shape=(d,), dtype=np.float32)
         self._prev_head = None
 
     def _maybe_init_grid_params(self):
-        # grid info only exists after reset
         base = self.unwrapped
         if (self.grid_size is None or self.unit_size is None) and hasattr(base, "controller"):
             grid = base.controller.grid
@@ -23,7 +21,6 @@ class SnakeObservationWrapper(gym.ObservationWrapper):
             self.unit_size = grid.unit_size
 
     def _get_food_positions_units(self, base):
-        # safer way to get food positions (uses controller instead of raw RGB)
         foods = []
         if hasattr(base, "controller"):
             c = base.controller
@@ -35,7 +32,6 @@ class SnakeObservationWrapper(gym.ObservationWrapper):
                         foods.append(np.array(f.pos, dtype=np.float32))
                     elif hasattr(f, "location"):
                         foods.append(np.array(f.location, dtype=np.float32))
-        # scan grid if controller.foods not available
         if len(foods) == 0 and hasattr(base, "controller"):
             grid = base.controller.grid
             color = np.array([0, 0, 255], dtype=np.uint8)
@@ -54,46 +50,58 @@ class SnakeObservationWrapper(gym.ObservationWrapper):
     def observation(self, obs):
         self._maybe_init_grid_params()
         if self.grid_size is None:
-            # grid not ready yet
             return np.zeros(self.observation_space.shape, dtype=np.float32)
 
         base = self.unwrapped
         snake = getattr(base.controller, "snakes", [None])[0] if hasattr(base, "controller") else None
         if snake is None:
-            # just return zeros if snake isn't there yet
             return np.zeros(self.observation_space.shape, dtype=np.float32)
 
         gw, gh = self.grid_size
         norm = np.array([float(gw), float(gh)], dtype=np.float32)
 
-        # normalize head coords
         head = np.array(snake.head, dtype=np.float32)
         head_norm = head / norm
 
-        # direction (up, down, left, right)
-        if hasattr(snake, "direction"):
-            dx, dy = np.array(snake.direction, dtype=np.int32)
-            dir_onehot = np.array([
+        def _onehot_from_dxdy(dx, dy):
+            return np.array([
                 1.0 if (dx, dy) == (0, -1) else 0.0,
                 1.0 if (dx, dy) == (0,  1) else 0.0,
                 1.0 if (dx, dy) == (-1, 0) else 0.0,
                 1.0 if (dx, dy) == (1,  0) else 0.0,
             ], dtype=np.float32)
-        else:
-            # if no direction given
+
+        dir_onehot = np.zeros(4, dtype=np.float32)
+        dir_val = getattr(snake, "direction", None)
+        used = False
+        if dir_val is not None:
+            try:
+                arr = np.asarray(dir_val)
+                if arr.shape == (2,):
+                    dx, dy = int(arr[0]), int(arr[1])
+                    dir_onehot = _onehot_from_dxdy(dx, dy)
+                    used = True
+            except Exception:
+                pass
+
+        if not used:
             if self._prev_head is None:
-                dir_onehot = np.array([0, 0, 0, 0], dtype=np.float32)
+                dir_onehot = np.zeros(4, dtype=np.float32)
             else:
                 d = head - np.array(self._prev_head, dtype=np.float32)
                 if abs(d[0]) > abs(d[1]):
-                    dir_onehot = np.array([0, 0, 1.0 if d[0] < 0 else 0.0, 1.0 if d[0] > 0 else 0.0], dtype=np.float32)
+                    dir_onehot = np.array(
+                        [0.0, 0.0, 1.0 if d[0] < 0 else 0.0, 1.0 if d[0] > 0 else 0.0],
+                        dtype=np.float32
+                    )
                 else:
-                    dir_onehot = np.array([1.0 if d[1] < 0 else 0.0, 1.0 if d[1] > 0 else 0.0, 0, 0], dtype=np.float32)
+                    dir_onehot = np.array(
+                        [1.0 if d[1] < 0 else 0.0, 1.0 if d[1] > 0 else 0.0, 0.0, 0.0],
+                        dtype=np.float32
+                    )
 
-        # get nearest food (normalized + delta + dist)
         foods = self._get_food_positions_units(base)
         if len(foods) == 0:
-            food = np.array([0.0, 0.0], dtype=np.float32)
             food_norm = np.array([0.0, 0.0], dtype=np.float32)
             delta_norm = np.array([0.0, 0.0], dtype=np.float32)
             dist_norm = np.array([0.0], dtype=np.float32)
@@ -107,7 +115,6 @@ class SnakeObservationWrapper(gym.ObservationWrapper):
             max_d = np.linalg.norm(norm)
             dist_norm = np.array([float(dists[j] / max_d)], dtype=np.float32)
 
-        # tail/body positions
         body_coords = list(snake.body)[-self.max_body_parts:]
         k = len(body_coords)
         if k > 0:
@@ -119,17 +126,14 @@ class SnakeObservationWrapper(gym.ObservationWrapper):
             body_arr = np.concatenate([body_arr, pad], axis=0)
         body_flat = body_arr.reshape(-1)
 
-        # mask marks how many segments are real
         body_mask = np.zeros((self.max_body_parts,), dtype=np.float32)
         if k > 0:
             body_mask[:k] = 1.0
 
-        # normalized snake length
         length_norm = np.array([min(1.0, k / float(self.max_body_parts))], dtype=np.float32)
 
         self._prev_head = tuple(head.tolist())
 
-        # final stacked vector
         feat = np.concatenate([
             head_norm,
             dir_onehot,
